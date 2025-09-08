@@ -37,3 +37,65 @@
 #clearBet:hover {
   background: #475569;
 }
+.cards {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* Base card */
+.card {
+  width: 70px;
+  height: 100px;
+  background: white;
+  border-radius: 8px;
+  border: 2px solid #222;
+  box-shadow: 0 4px 6px rgba(0,0,0,.3);
+  font-family: "Georgia", serif;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Top-left rank + suit */
+.card .corner {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  text-align: left;
+  font-size: 14px;
+  line-height: 1.1;
+}
+
+/* Bottom-right rank + suit (rotated) */
+.card .corner.bottom {
+  bottom: 6px;
+  right: 6px;
+  top: auto;
+  left: auto;
+  transform: rotate(180deg);
+}
+
+/* Big suit symbol in center */
+.card .suit {
+  font-size: 28px;
+  opacity: 0.8;
+}
+
+/* Colors */
+.card.red { color: crimson; }
+.card.black { color: black; }
+
+/* Back of card */
+.card.back {
+  background: repeating-linear-gradient(
+    45deg,
+    #1e293b,
+    #1e293b 10px,
+    #334155 10px,
+    #334155 20px
+  );
+  border: 2px solid #fff;
+}
