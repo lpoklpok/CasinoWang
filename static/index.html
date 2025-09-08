@@ -1,0 +1,99 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Friends Blackjack</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="container">
+    <h1>♠️ Friends Blackjack (Play Money) ♥️</h1>
+
+    <div class="controls">
+      <button id="dealBtn">Deal</button>
+      <button id="hitBtn" disabled>Hit</button>
+      <button id="standBtn" disabled>Stand</button>
+      <span id="status" class="status"></span>
+    </div>
+
+    <section class="table">
+      <div class="hand">
+        <h2>Dealer</h2>
+        <div id="dealerCards" class="cards"></div>
+        <div id="dealerTotal" class="total"></div>
+      </div>
+      <div class="hand">
+        <h2>You</h2>
+        <div id="playerCards" class="cards"></div>
+        <div id="playerTotal" class="total"></div>
+      </div>
+    </section>
+
+    <p class="note">For fun only. No real money.</p>
+  </main>
+
+  <script>
+    let gameId = null;
+
+    const dealBtn = document.getElementById("dealBtn");
+    const hitBtn = document.getElementById("hitBtn");
+    const standBtn = document.getElementById("standBtn");
+    const statusEl = document.getElementById("status");
+    const dealerCardsEl = document.getElementById("dealerCards");
+    const playerCardsEl = document.getElementById("playerCards");
+    const dealerTotalEl = document.getElementById("dealerTotal");
+    const playerTotalEl = document.getElementById("playerTotal");
+
+    function render(state) {
+      // cards
+      dealerCardsEl.innerHTML = state.dealer.map(c => `<span class="card">${c}</span>`).join("");
+      playerCardsEl.innerHTML = state.player.map(c => `<span class="card">${c}</span>`).join("");
+
+      // totals
+      dealerTotalEl.textContent = state.dealerTotal !== null ? `Total: ${state.dealerTotal}` : "";
+      playerTotalEl.textContent = `Total: ${state.playerTotal}`;
+
+      // status
+      statusEl.textContent = state.status.replaceAll("_", " ");
+
+      // buttons
+      const playerTurn = state.status === "player_turn";
+      hitBtn.disabled = !playerTurn;
+      standBtn.disabled = !playerTurn;
+    }
+
+    async function post(url, body = {}) {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    }
+
+    dealBtn.onclick = async () => {
+      try {
+        const data = await post("/api/new-game");
+        gameId = data.gameId;
+        render(data);
+      } catch (e) { alert(e); }
+    };
+
+    hitBtn.onclick = async () => {
+      try {
+        const data = await post("/api/hit", { gameId });
+        render(data);
+      } catch (e) { alert(e); }
+    };
+
+    standBtn.onclick = async () => {
+      try {
+        const data = await post("/api/stand", { gameId });
+        render(data);
+      } catch (e) { alert(e); }
+    };
+  </script>
+</body>
+</html>
