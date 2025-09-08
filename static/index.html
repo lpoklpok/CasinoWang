@@ -159,6 +159,25 @@
         render(data);
       } catch (e) { alert(e); }
     };
+    function renderCard(code, hidden=false) {
+      if (hidden) return `<div class="card back"></div>`;
+      const rank = code.slice(0, -1);
+      const suitLetter = code.slice(-1);
+      const suits = { S: "♠", H: "♥", D: "♦", C: "♣" };
+      const suitSymbol = suits[suitLetter];
+      const suitClass = (suitLetter === "H" || suitLetter === "D") ? "red" : "black";
+      return `
+        <div class="card ${suitClass}">
+          <div class="corner">
+            ${rank}<br>${suitSymbol}
+          </div>
+          <div class="suit">${suitSymbol}</div>
+          <div class="corner bottom">
+            ${rank}<br>${suitSymbol}
+          </div>
+        </div>
+      `;
+    }
 
     updateUI();
   </script>
