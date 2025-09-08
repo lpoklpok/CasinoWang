@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -8,7 +8,19 @@
 </head>
 <body>
   <main class="container">
-    <h1>♠️ Casino Wang Blackjack ♥️</h1>
+    <h1>♠️ Friends Blackjack ♥️</h1>
+
+    <div class="balance">
+      Balance: <span id="balance">500</span> chips
+      | Current Bet: <span id="bet">0</span>
+    </div>
+
+    <div class="chips">
+      <button class="chip" data-value="5">5</button>
+      <button class="chip" data-value="25">25</button>
+      <button class="chip" data-value="100">100</button>
+      <button id="clearBet">Clear Bet</button>
+    </div>
 
     <div class="controls">
       <button id="dealBtn">Deal</button>
@@ -30,37 +42,65 @@
       </div>
     </section>
 
-    <p class="note"> Let's get degen.</p>
+    <p class="note">For fun only. No real money.</p>
   </main>
 
   <script>
     let gameId = null;
+    let balance = 500;
+    let currentBet = 0;
+    let roundActive = false;
 
-    const dealBtn = document.getElementById("dealBtn");
-    const hitBtn = document.getElementById("hitBtn");
-    const standBtn = document.getElementById("standBtn");
-    const statusEl = document.getElementById("status");
-    const dealerCardsEl = document.getElementById("dealerCards");
-    const playerCardsEl = document.getElementById("playerCards");
-    const dealerTotalEl = document.getElementById("dealerTotal");
-    const playerTotalEl = document.getElementById("playerTotal");
+    function renderCard(code, hidden=false) {
+      if (hidden) return `<div class="card back"></div>`;
+      const rank = code.slice(0, -1);
+      const suitLetter = code.slice(-1);
+      const suits = { S: "♠", H: "♥", D: "♦", C: "♣" };
+      const suitSymbol = suits[suitLetter];
+      const suitClass = (suitLetter === "H" || suitLetter === "D") ? "red" : "black";
+      return `
+        <div class="card ${suitClass}">
+          <span class="rank">${rank}</span>
+          <span class="suit">${suitSymbol}</span>
+        </div>
+      `;
+    }
 
     function render(state) {
-      // cards
-      dealerCardsEl.innerHTML = state.dealer.map(c => `<span class="card">${c}</span>`).join("");
-      playerCardsEl.innerHTML = state.player.map(c => `<span class="card">${c}</span>`).join("");
+      document.getElementById("dealerCards").innerHTML =
+        state.dealer.map((c, i) => renderCard(c, i === 1 && state.status === "player_turn")).join("");
 
-      // totals
-      dealerTotalEl.textContent = state.dealerTotal !== null ? `Total: ${state.dealerTotal}` : "";
-      playerTotalEl.textContent = `Total: ${state.playerTotal}`;
+      document.getElementById("playerCards").innerHTML =
+        state.player.map(c => renderCard(c)).join("");
 
-      // status
-      statusEl.textContent = state.status.replaceAll("_", " ");
+      document.getElementById("dealerTotal").textContent =
+        state.dealerTotal !== null ? `Total: ${state.dealerTotal}` : "";
+      document.getElementById("playerTotal").textContent =
+        `Total: ${state.playerTotal}`;
 
-      // buttons
+      document.getElementById("status").textContent =
+        state.status.replaceAll("_", " ");
+
       const playerTurn = state.status === "player_turn";
-      hitBtn.disabled = !playerTurn;
-      standBtn.disabled = !playerTurn;
+      document.getElementById("hitBtn").disabled = !playerTurn;
+      document.getElementById("standBtn").disabled = !playerTurn;
+
+      // End of round payout
+      if (!playerTurn && roundActive) {
+        roundActive = false;
+        if (state.status === "player_win" || state.status === "player_blackjack") {
+          balance += currentBet * 2; // win pays 1:1
+        } else if (state.status === "push") {
+          balance += currentBet; // return bet
+        }
+        currentBet = 0;
+        updateUI();
+      }
+    }
+
+    function updateUI() {
+      document.getElementById("balance").textContent = balance;
+      document.getElementById("bet").textContent = currentBet;
     }
 
     async function post(url, body = {}) {
@@ -73,27 +113,54 @@
       return res.json();
     }
 
-    dealBtn.onclick = async () => {
+    // Buttons
+    document.querySelectorAll(".chip").forEach(btn => {
+      btn.onclick = () => {
+        if (roundActive) return;
+        const value = parseInt(btn.dataset.value);
+        if (balance >= value) {
+          balance -= value;
+          currentBet += value;
+          updateUI();
+        }
+      };
+    });
+
+    document.getElementById("clearBet").onclick = () => {
+      if (roundActive) return;
+      balance += currentBet;
+      currentBet = 0;
+      updateUI();
+    };
+
+    document.getElementById("dealBtn").onclick = async () => {
+      if (currentBet === 0) {
+        alert("Place a bet first!");
+        return;
+      }
       try {
         const data = await post("/api/new-game");
         gameId = data.gameId;
+        roundActive = true;
         render(data);
       } catch (e) { alert(e); }
     };
 
-    hitBtn.onclick = async () => {
+    document.getElementById("hitBtn").onclick = async () => {
       try {
         const data = await post("/api/hit", { gameId });
         render(data);
       } catch (e) { alert(e); }
     };
 
-    standBtn.onclick = async () => {
+    document.getElementById("standBtn").onclick = async () => {
       try {
         const data = await post("/api/stand", { gameId });
         render(data);
       } catch (e) { alert(e); }
     };
+
+    updateUI();
   </script>
 </body>
 </html>
