@@ -2,10 +2,10 @@ from flask import Flask, request, jsonify, send_from_directory
 import random, secrets
 
 app = Flask(__name__, static_folder="static", static_url_path="")
-GAMES = {}  # in-memory storage: {game_id: {...}}
+GAMES = {}  # Store active games
 
 RANKS = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"]
-SUITS = ["S","H","D","C"]  # spades, hearts, diamonds, clubs
+SUITS = ["S","H","D","C"]
 
 def new_deck():
     deck = [f"{r}{s}" for s in SUITS for r in RANKS]
@@ -20,35 +20,55 @@ def card_value(rank):
     return int(rank)
 
 def hand_total(cards):
-    # cards like ["AS","10H"]
-    ranks = [c[:-1] for c in cards]  # strip suit
+    ranks = [c[:-1] for c in cards]
     total = sum(card_value(r) for r in ranks)
-    # Adjust Aces from 11 to 1 if bust
     aces = ranks.count("A")
     while total > 21 and aces > 0:
         total -= 10
         aces -= 1
     return total
 
-def deal_card(game):
-    game["player_turn"]  # just ensures key exists
-    if not game["deck"]:
-        game["deck"] = new_deck()
-    return game["deck"].pop()
-
 def summarize(game):
     return {
         "gameId": game["id"],
-        "status": game["status"],
-        "player": game["player"],
+        "hands": game["hands"],
+        "activeHand": game["activeHand"],
         "dealer": game["dealer"] if game["status"] != "player_turn" else [game["dealer"][0], "??"],
-        "playerTotal": hand_total(game["player"]),
-        "dealerTotal": hand_total(game["dealer"]) if game["status"] != "player_turn" else None
+        "status": game["status"],
+        "bets": game["bets"],
+        "totals": {
+            "dealer": hand_total(game["dealer"]) if game["status"] != "player_turn" else None,
+            "hands": [hand_total(h) for h in game["hands"]]
+        }
     }
+
+def stand_logic(game):
+    # Dealer plays out
+    while hand_total(game["dealer"]) < 17:
+        game["dealer"].append(game["deck"].pop())
+
+    dealer_total = hand_total(game["dealer"])
+    results = []
+
+    for idx, hand in enumerate(game["hands"]):
+        player_total = hand_total(hand)
+        if game.get("surrendered", {}).get(idx):
+            results.append("surrender")
+        elif player_total > 21:
+            results.append("player_bust")
+        elif dealer_total > 21 or player_total > dealer_total:
+            results.append("player_win")
+        elif dealer_total > player_total:
+            results.append("dealer_win")
+        else:
+            results.append("push")
+
+    game["results"] = results
+    game["status"] = "finished"
+    return jsonify(summarize(game))
 
 @app.route("/")
 def root():
-    # Serve the UI
     return send_from_directory(app.static_folder, "index.html")
 
 @app.route("/api/new-game", methods=["POST"])
@@ -57,26 +77,25 @@ def new_game():
     deck = new_deck()
     player = [deck.pop(), deck.pop()]
     dealer = [deck.pop(), deck.pop()]
-    status = "player_turn"
 
-    # Natural blackjack checks
-    p = hand_total(player)
-    d = hand_total(dealer)
-    if p == 21 and d == 21:
-        status = "push"
-    elif p == 21:
-        status = "player_blackjack"
-    elif d == 21:
-        status = "dealer_blackjack"
+    hands = [player]
+    bets = [100]  # frontend handles actual bet amounts
 
     game = {
         "id": game_id,
         "deck": deck,
-        "player": player,
+        "hands": hands,
+        "activeHand": 0,
         "dealer": dealer,
-        "status": status,            # player_turn | player_bust | dealer_win | player_win | push | ...
-        "player_turn": (status == "player_turn")
+        "bets": bets,
+        "status": "player_turn",
+        "surrendered": {}
     }
+
+    # Check for natural blackjack
+    if hand_total(player) == 21:
+        game["status"] = "player_blackjack"
+
     GAMES[game_id] = game
     return jsonify(summarize(game))
 
@@ -85,11 +104,18 @@ def hit():
     data = request.get_json(force=True)
     game = GAMES.get(data.get("gameId"))
     if not game or game["status"] != "player_turn":
-        return jsonify({"error": "Invalid game or not player's turn"}), 400
+        return jsonify({"error": "Invalid game"}), 400
 
-    game["player"].append(deal_card(game))
-    if hand_total(game["player"]) > 21:
-        game["status"] = "player_bust"
+    hand = game["hands"][game["activeHand"]]
+    hand.append(game["deck"].pop())
+
+    if hand_total(hand) > 21:
+        # Bust → move to next hand or dealer
+        if game["activeHand"] + 1 < len(game["hands"]):
+            game["activeHand"] += 1
+        else:
+            return stand_logic(game)
+
     return jsonify(summarize(game))
 
 @app.route("/api/stand", methods=["POST"])
@@ -97,26 +123,69 @@ def stand():
     data = request.get_json(force=True)
     game = GAMES.get(data.get("gameId"))
     if not game or game["status"] != "player_turn":
-        return jsonify({"error": "Invalid game or not player's turn"}), 400
+        return jsonify({"error": "Invalid game"}), 400
 
-    # Dealer reveals and draws to 17+
-    while hand_total(game["dealer"]) < 17:
-        game["dealer"].append(deal_card(game))
-
-    p = hand_total(game["player"])
-    d = hand_total(game["dealer"])
-
-    if d > 21:
-        game["status"] = "player_win"
-    elif p > d:
-        game["status"] = "player_win"
-    elif d > p:
-        game["status"] = "dealer_win"
+    if game["activeHand"] + 1 < len(game["hands"]):
+        game["activeHand"] += 1
+        return jsonify(summarize(game))
     else:
-        game["status"] = "push"
+        return stand_logic(game)
 
+@app.route("/api/double", methods=["POST"])
+def double_down():
+    data = request.get_json(force=True)
+    game = GAMES.get(data.get("gameId"))
+    if not game or game["status"] != "player_turn":
+        return jsonify({"error": "Invalid game"}), 400
+
+    idx = game["activeHand"]
+    hand = game["hands"][idx]
+
+    if len(hand) != 2 or game["bets"][idx] > 500:  # crude rule
+        return jsonify({"error": "Can only double on first move"}), 400
+
+    game["bets"][idx] *= 2
+    hand.append(game["deck"].pop())
+
+    if game["activeHand"] + 1 < len(game["hands"]):
+        game["activeHand"] += 1
+        return jsonify(summarize(game))
+    else:
+        return stand_logic(game)
+
+@app.route("/api/surrender", methods=["POST"])
+def surrender():
+    data = request.get_json(force=True)
+    game = GAMES.get(data.get("gameId"))
+    if not game or game["status"] != "player_turn":
+        return jsonify({"error": "Invalid game"}), 400
+
+    idx = game["activeHand"]
+    game["surrendered"][idx] = True
+
+    if game["activeHand"] + 1 < len(game["hands"]):
+        game["activeHand"] += 1
+        return jsonify(summarize(game))
+    else:
+        return stand_logic(game)
+
+@app.route("/api/split", methods=["POST"])
+def split():
+    data = request.get_json(force=True)
+    game = GAMES.get(data.get("gameId"))
+    if not game or game["status"] != "player_turn":
+        return jsonify({"error": "Invalid game"}), 400
+
+    idx = game["activeHand"]
+    hand = game["hands"][idx]
+    if len(hand) == 2 and hand[0][:-1] == hand[1][:-1]:
+        card1, card2 = hand
+        new_hand1 = [card1, game["deck"].pop()]
+        new_hand2 = [card2, game["deck"].pop()]
+        game["hands"][idx] = new_hand1
+        game["hands"].insert(idx+1, new_hand2)
+        game["bets"].insert(idx+1, game["bets"][idx])
     return jsonify(summarize(game))
 
 if __name__ == "__main__":
-    # Local dev
     app.run(debug=True)

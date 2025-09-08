@@ -10,9 +10,10 @@
   <main class="container">
     <h1>♠️ Friends Blackjack ♥️</h1>
 
+    <!-- Balance + betting -->
     <div class="balance">
-      Balance: <span id="balance">500</span> chips
-      | Current Bet: <span id="bet">0</span>
+      Balance: <span id="balance">500</span> chips |
+      Current Bet: <span id="bet">0</span>
     </div>
 
     <div class="chips">
@@ -22,13 +23,18 @@
       <button id="clearBet">Clear Bet</button>
     </div>
 
+    <!-- Controls -->
     <div class="controls">
       <button id="dealBtn">Deal</button>
       <button id="hitBtn" disabled>Hit</button>
       <button id="standBtn" disabled>Stand</button>
+      <button id="doubleBtn" disabled>Double</button>
+      <button id="splitBtn" disabled>Split</button>
+      <button id="surrenderBtn" disabled>Surrender</button>
       <span id="status" class="status"></span>
     </div>
 
+    <!-- Table -->
     <section class="table">
       <div class="hand">
         <h2>Dealer</h2>
@@ -45,62 +51,94 @@
     <p class="note">For fun only. No real money.</p>
   </main>
 
+  <!-- Audio -->
+  <audio id="dealSound" src="sounds/deal.mp3"></audio>
+  <audio id="chipSound" src="sounds/chip.mp3"></audio>
+  <audio id="winSound" src="sounds/win.mp3"></audio>
+  <audio id="loseSound" src="sounds/lose.mp3"></audio>
+
   <script>
     let gameId = null;
     let balance = 500;
     let currentBet = 0;
     let roundActive = false;
 
+    function playSound(id) {
+      const sound = document.getElementById(id);
+      if (sound) {
+        sound.currentTime = 0;
+        sound.play();
+      }
+    }
+
     function renderCard(code, hidden=false) {
-      if (hidden) return `<div class="card back"></div>`;
+      if (hidden) return `<div class="card back new-card"></div>`;
       const rank = code.slice(0, -1);
       const suitLetter = code.slice(-1);
       const suits = { S: "♠", H: "♥", D: "♦", C: "♣" };
       const suitSymbol = suits[suitLetter];
       const suitClass = (suitLetter === "H" || suitLetter === "D") ? "red" : "black";
       return `
-        <div class="card ${suitClass}">
-          <span class="rank">${rank}</span>
-          <span class="suit">${suitSymbol}</span>
+        <div class="card ${suitClass} new-card">
+          <div class="corner">${rank}<br>${suitSymbol}</div>
+          <div class="suit">${suitSymbol}</div>
+          <div class="corner bottom">${rank}<br>${suitSymbol}</div>
         </div>
       `;
     }
 
+    function updateUI() {
+      document.getElementById("balance").textContent = balance;
+      document.getElementById("bet").textContent = currentBet;
+    }
+
     function render(state) {
+      // Dealer
       document.getElementById("dealerCards").innerHTML =
         state.dealer.map((c, i) => renderCard(c, i === 1 && state.status === "player_turn")).join("");
-
-      document.getElementById("playerCards").innerHTML =
-        state.player.map(c => renderCard(c)).join("");
-
       document.getElementById("dealerTotal").textContent =
-        state.dealerTotal !== null ? `Total: ${state.dealerTotal}` : "";
-      document.getElementById("playerTotal").textContent =
-        `Total: ${state.playerTotal}`;
+        state.totals.dealer !== null ? `Total: ${state.totals.dealer}` : "";
 
+      // Player
+      const currentHand = state.hands[state.activeHand];
+      document.getElementById("playerCards").innerHTML =
+        currentHand.map(c => renderCard(c)).join("");
+      document.getElementById("playerTotal").textContent =
+        `Total: ${state.totals.hands[state.activeHand]}`;
+
+      // Status
       document.getElementById("status").textContent =
         state.status.replaceAll("_", " ");
 
       const playerTurn = state.status === "player_turn";
       document.getElementById("hitBtn").disabled = !playerTurn;
       document.getElementById("standBtn").disabled = !playerTurn;
+      document.getElementById("doubleBtn").disabled = !(playerTurn && currentHand.length === 2);
+      document.getElementById("splitBtn").disabled = !(playerTurn && currentHand.length === 2 && currentHand[0].slice(0,-1) === currentHand[1].slice(0,-1));
+      document.getElementById("surrenderBtn").disabled = !playerTurn;
 
-      // End of round payout
-      if (!playerTurn && roundActive) {
+      // Payout resolution
+      if (state.status === "finished" && roundActive) {
         roundActive = false;
-        if (state.status === "player_win" || state.status === "player_blackjack") {
-          balance += currentBet * 2; // win pays 1:1
-        } else if (state.status === "push") {
-          balance += currentBet; // return bet
-        }
+        state.results.forEach((res, idx) => {
+          const bet = state.bets[idx];
+          if (res === "player_blackjack") {
+            balance += Math.floor(bet * 2.5); // 3:2 payout
+            playSound("winSound");
+          } else if (res === "player_win") {
+            balance += bet * 2;
+            playSound("winSound");
+          } else if (res === "push") {
+            balance += bet;
+          } else if (res === "surrender") {
+            balance += Math.floor(bet / 2);
+          } else {
+            playSound("loseSound");
+          }
+        });
         currentBet = 0;
         updateUI();
       }
-    }
-
-    function updateUI() {
-      document.getElementById("balance").textContent = balance;
-      document.getElementById("bet").textContent = currentBet;
     }
 
     async function post(url, body = {}) {
@@ -113,7 +151,7 @@
       return res.json();
     }
 
-    // Buttons
+    // Betting
     document.querySelectorAll(".chip").forEach(btn => {
       btn.onclick = () => {
         if (roundActive) return;
@@ -122,10 +160,10 @@
           balance -= value;
           currentBet += value;
           updateUI();
+          playSound("chipSound");
         }
       };
     });
-
     document.getElementById("clearBet").onclick = () => {
       if (roundActive) return;
       balance += currentBet;
@@ -133,51 +171,41 @@
       updateUI();
     };
 
+    // Game controls
     document.getElementById("dealBtn").onclick = async () => {
       if (currentBet === 0) {
         alert("Place a bet first!");
         return;
       }
       try {
-        const data = await post("/api/new-game");
+        const data = await post("/api/new-game", { bet: currentBet });
         gameId = data.gameId;
         roundActive = true;
+        playSound("dealSound");
         render(data);
       } catch (e) { alert(e); }
     };
-
     document.getElementById("hitBtn").onclick = async () => {
-      try {
-        const data = await post("/api/hit", { gameId });
-        render(data);
-      } catch (e) { alert(e); }
+      const data = await post("/api/hit", { gameId });
+      render(data);
+      playSound("dealSound");
     };
-
     document.getElementById("standBtn").onclick = async () => {
-      try {
-        const data = await post("/api/stand", { gameId });
-        render(data);
-      } catch (e) { alert(e); }
+      const data = await post("/api/stand", { gameId });
+      render(data);
     };
-    function renderCard(code, hidden=false) {
-      if (hidden) return `<div class="card back"></div>`;
-      const rank = code.slice(0, -1);
-      const suitLetter = code.slice(-1);
-      const suits = { S: "♠", H: "♥", D: "♦", C: "♣" };
-      const suitSymbol = suits[suitLetter];
-      const suitClass = (suitLetter === "H" || suitLetter === "D") ? "red" : "black";
-      return `
-        <div class="card ${suitClass} new-card">
-          <div class="corner">
-            ${rank}<br>${suitSymbol}
-          </div>
-          <div class="suit">${suitSymbol}</div>
-          <div class="corner bottom">
-            ${rank}<br>${suitSymbol}
-          </div>
-        </div>
-      `;
-    }
+    document.getElementById("doubleBtn").onclick = async () => {
+      const data = await post("/api/double", { gameId });
+      render(data);
+    };
+    document.getElementById("splitBtn").onclick = async () => {
+      const data = await post("/api/split", { gameId });
+      render(data);
+    };
+    document.getElementById("surrenderBtn").onclick = async () => {
+      const data = await post("/api/surrender", { gameId });
+      render(data);
+    };
 
     updateUI();
   </script>

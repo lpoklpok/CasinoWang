@@ -113,3 +113,13 @@
 .card.new-card {
   animation: deal 0.4s ease-out;
 }
+
+#doubleBtn, #splitBtn, #surrenderBtn {
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: #3b82f6;
+  color: white;
+  margin: 5px;
+}
+#surrenderBtn { background: #ef4444; }
+#splitBtn { background: #22c55e; }
